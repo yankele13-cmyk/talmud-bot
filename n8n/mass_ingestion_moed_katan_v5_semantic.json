@@ -1,0 +1,275 @@
+{
+    "name": "Mass Ingestion V5 - Moed Katan (Semantic Chunking)",
+    "nodes": [
+        {
+            "parameters": {},
+            "name": "Manual Trigger",
+            "type": "n8n-nodes-base.manualTrigger",
+            "typeVersion": 1,
+            "position": [
+                100,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const dafList=[];const maxDaf=29;for(let i=2;i<=maxDaf;i++){dafList.push({ref:`Moed_Katan.${i}a`});if(i<maxDaf){dafList.push({ref:`Moed_Katan.${i}b`})}}return dafList;"
+            },
+            "name": "Generate Daf List",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                300,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "batchSize": 1,
+                "options": {}
+            },
+            "name": "Split In Batches",
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                500,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "url": "=https://www.sefaria.org/api/texts/{{$json.ref}}?commentary=1&context=1",
+                "method": "GET",
+                "options": {}
+            },
+            "name": "GET Sefaria with Comments",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                700,
+                300
+            ],
+            "continueOnFail": true
+        },
+        {
+            "parameters": {
+                "jsCode": "return $input.all().flatMap(item=>{const data=item.json;if(!data||!data.he||data.error)return[{json:{error:\"No Data or API Fail\",ref:data.ref}}];const cleanHTML=str=>(str||\"\").replace(/<[^>]*>?/gm,\"\");let mainText=\"\";if(Array.isArray(data.he)){const flatten=arr=>arr.reduce((acc,val)=>Array.isArray(val)?acc.concat(flatten(val)):acc.concat(val),[]);mainText=flatten(data.he).join(\"\\n\")}else{mainText=String(data.he)}const comments=data.commentary||[];const rashi=comments.filter(c=>c.collectiveTitle===\"Rashi\").map(c=>cleanHTML(c.he)).join(\"\\n\");const tosafot=comments.filter(c=>c.collectiveTitle===\"Tosafot\").map(c=>cleanHTML(c.he)).join(\"\\n\");const fullContent=`[GEMARA]\\n${cleanHTML(mainText)}\\n\\n[RASHI]\\n${rashi}\\n\\n[TOSAFOT]\\n${tosafot}`;const ref=data.ref||\"Unknown\";const daf=ref.split(\" \").pop();const MAX_CHUNK_SIZE=4000;const OVERLAP=200;const chunks=[];let startIndex=0;while(startIndex<fullContent.length){let EndIndex=Math.min(startIndex+MAX_CHUNK_SIZE,fullContent.length);if(EndIndex<fullContent.length){const lastPeriod=fullContent.lastIndexOf(\".\",EndIndex);const lastNewLine=fullContent.lastIndexOf(\"\\n\",EndIndex);if(lastPeriod>startIndex+MAX_CHUNK_SIZE/2){EndIndex=lastPeriod+1}else if(lastNewLine>startIndex+MAX_CHUNK_SIZE/2){EndIndex=lastNewLine+1}}const chunkText=fullContent.substring(startIndex,EndIndex);chunks.push({content:chunkText,chunk_index:chunks.length});startIndex=EndIndex-OVERLAP;if(startIndex<0)startIndex=0;if(startIndex>=fullContent.length-OVERLAP){break}}return chunks.map(chunk=>({json:{masechet:data.indexTitle||\"Moed Katan\",heMasechet:data.heIndexTitle||\"מועד קטן\",daf:daf,ref:ref,type:\"Gemara+Commentary\",language:\"he\",content:chunk.content,chunk_index:chunk.chunk_index,total_chunks:chunks.length,rashi_count:rashi.length,tosafot_count:tosafot.length}}))}).filter(i=>!i.json.error);"
+            },
+            "name": "Parse Text (Semantic Chunking)",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                900,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "return $input.all().map(item=>{const data=item.json;const partSuffix=data.total_chunks>1?` (Part ${data.chunk_index+1}/${data.total_chunks})`:\"\";const template=`\\nמסכת: ${data.heMasechet}\\nדף: ${data.daf}${partSuffix}\\nסוג: גמרא + רש\"י + תוספות\\n\\n====================\\nטקסט (גמרא - חלק ${data.chunk_index+1})\\n====================\\n${data.content}\\n\\n====================\\nסיום\\n====================\\n`;return{json:{...data,formatted_text:template.trim(),metadata:{masechet:data.masechet,daf:data.daf,ref:data.ref,type:data.type,language:\"he\",url:`https://www.sefaria.org/${(data.ref||\"\").replace(/ /g,'_')}`,text_content:template.trim(),chunk_index:data.chunk_index,total_chunks:data.total_chunks}}}});"
+            },
+            "name": "Structure Text",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1100,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "function stringToUuid(str){let hash=0;for(let i=0;i<str.length;i++){const char=str.charCodeAt(i);hash=((hash<<5)-hash)+char;hash=hash&hash}const hex=Math.abs(hash).toString(16).padStart(32,'0');return`${hex.substr(0,8)}-${hex.substr(8,4)}-${hex.substr(12,4)}-${hex.substr(16,4)}-${hex.substr(20,12)}`}return $input.all().map(item=>{const ref=item.json.ref||item.json.metadata?.ref||\"unknown\";const chunkIndex=item.json.chunk_index||0;const uuidRef=`${ref}_sem_part${chunkIndex}`;return{json:{...item.json,uuid:stringToUuid(uuidRef)}}});"
+            },
+            "name": "Generate UUID",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1300,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.openai.com/v1/embeddings",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "openAiApi",
+                "sendBody": true,
+                "contentType": "json",
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "value": "text-embedding-ada-002"
+                        },
+                        {
+                            "name": "input",
+                            "value": "={{$json[\"formatted_text\"]}}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "name": "OpenAI API (Direct)",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1500,
+                300
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "YOUR_OPENAI_CREDENTIAL_ID",
+                    "name": "OpenAI account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "const items=$input.all();const prevItems=$(\"Generate UUID\").all();return items.map((item,i)=>{const row=item.json;const prev=prevItems[i]?prevItems[i].json:{};const uuid=row.uuid||prev.uuid;const embedding=row.data?row.data[0].embedding:null;const metadata=row.metadata||prev.metadata;if(!uuid||!embedding){throw new Error(`MISSING DATA: UUID=${Boolean(uuid)} Embedding=${Boolean(embedding)}`)}return{json:{qdrant_body:{points:[{id:uuid,vector:embedding,payload:metadata}]}}}});"
+            },
+            "name": "Prepare Payload",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1700,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "url": "http://qdrant:6333/collections/talmud_vectors/points?wait=true",
+                "method": "PUT",
+                "sendBody": true,
+                "contentType": "json",
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "points",
+                            "value": "={{$json.qdrant_body.points}}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "name": "Qdrant Upsert (HTTP)",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1900,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Manual Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Generate Daf List",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Generate Daf List": {
+            "main": [
+                [
+                    {
+                        "node": "Split In Batches",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Split In Batches": {
+            "main": [
+                [
+                    {
+                        "node": "GET Sefaria with Comments",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "GET Sefaria with Comments": {
+            "main": [
+                [
+                    {
+                        "node": "Parse Text (Semantic Chunking)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Parse Text (Semantic Chunking)": {
+            "main": [
+                [
+                    {
+                        "node": "Structure Text",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Structure Text": {
+            "main": [
+                [
+                    {
+                        "node": "Generate UUID",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Generate UUID": {
+            "main": [
+                [
+                    {
+                        "node": "OpenAI API (Direct)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "OpenAI API (Direct)": {
+            "main": [
+                [
+                    {
+                        "node": "Prepare Payload",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepare Payload": {
+            "main": [
+                [
+                    {
+                        "node": "Qdrant Upsert (HTTP)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Qdrant Upsert (HTTP)": {
+            "main": [
+                [
+                    {
+                        "node": "Split In Batches",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}

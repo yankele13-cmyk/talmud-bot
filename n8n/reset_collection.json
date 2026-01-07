@@ -1,0 +1,78 @@
+{
+    "name": "UTILS - Reset Qdrant Collection",
+    "nodes": [
+        {
+            "parameters": {},
+            "name": "Manual Trigger",
+            "type": "n8n-nodes-base.manualTrigger",
+            "typeVersion": 1,
+            "position": [
+                250,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "url": "http://qdrant:6333/collections/talmud_vectors",
+                "method": "DELETE",
+                "options": {}
+            },
+            "name": "DELETE Collection",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                450,
+                300
+            ],
+            "continueOnFail": true
+        },
+        {
+            "parameters": {
+                "url": "http://qdrant:6333/collections/talmud_vectors",
+                "method": "PUT",
+                "sendBody": true,
+                "contentType": "json",
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "vectors",
+                            "value": "={{ {\"size\": 1536, \"distance\": \"Cosine\"} }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "name": "CREATE Collection",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                650,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Manual Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "DELETE Collection",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "DELETE Collection": {
+            "main": [
+                [
+                    {
+                        "node": "CREATE Collection",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}

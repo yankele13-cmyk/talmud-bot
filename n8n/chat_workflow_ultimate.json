@@ -1,0 +1,431 @@
+{
+    "name": "Talmud Bot - Ultimate (V7 - Expansion + Rerank + Chain of Thought)",
+    "nodes": [
+        {
+            "parameters": {
+                "updates": [
+                    "message"
+                ],
+                "additionalFields": {}
+            },
+            "name": "Telegram Trigger",
+            "type": "n8n-nodes-base.telegramTrigger",
+            "typeVersion": 1,
+            "position": [
+                100,
+                300
+            ],
+            "credentials": {
+                "telegramApi": {
+                    "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+                    "name": "Telegram account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "const msg=$('Telegram Trigger').first().json.message;const userText=msg.text||\"\";const replyText=msg.reply_to_message?msg.reply_to_message.text:\"\";let finalQuery=userText;if(replyText){finalQuery=`Context: ${replyText}\\nQuestion: ${userText}`}return[{json:{query:finalQuery,original_query:userText}}];"
+            },
+            "name": "Prepare Context",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                300,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "openAiApi",
+                "sendBody": true,
+                "contentType": "json",
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "value": "gpt-3.5-turbo"
+                        },
+                        {
+                            "name": "messages",
+                            "value": "={{ [ {\"role\": \"system\", \"content\": \"You are a Talmudic Search Engine optimizer. Your job is to EXPAND the user query into better search terms.\\n\\nOutput ONLY the expanded search string in Hebrew/Aramaic.\\n\\nRules:\\n1. Add synonyms for key concepts (e.g. 'Irrigation' -> 'Hashkaja' 'Beit Hashlachin').\\n2. If the user uses modern Hebrew, add the Aramaic equivalent found in Gemara.\\n3. Keep it concise.\"}, {\"role\": \"user\", \"content\": $json.query} ] }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "name": "Query Expander",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                500,
+                300
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "YOUR_OPENAI_CREDENTIAL_ID",
+                    "name": "OpenAI account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.openai.com/v1/embeddings",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "openAiApi",
+                "sendBody": true,
+                "contentType": "json",
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "value": "text-embedding-ada-002"
+                        },
+                        {
+                            "name": "input",
+                            "value": "={{$json.choices[0].message.content}}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "name": "Embed Expanded Query",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                700,
+                300
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "YOUR_OPENAI_CREDENTIAL_ID",
+                    "name": "OpenAI account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "url": "http://qdrant:6333/collections/talmud_vectors/points/search",
+                "method": "POST",
+                "sendBody": true,
+                "contentType": "json",
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "vector",
+                            "value": "={{$json.data[0].embedding}}"
+                        },
+                        {
+                            "name": "limit",
+                            "value": 20
+                        },
+                        {
+                            "name": "with_payload",
+                            "value": true
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "name": "Qdrant Search (Broad 20)",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                900,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const items=$input.all();const queryData=$('Prepare Context').first().json;const origQuery=queryData.query;const searchResult=items[0]?items[0].json.result:[];const candidates=Array.isArray(searchResult)?searchResult:[];const candidatesText=candidates.map((c,i)=>`ID: ${i}\\nCONTENT: ${c.payload.text_content.substring(0,300)}...`).join(\"\\n\\n\");const judgePrompt=`You are an expert Judge of relevance. The user asked: \"${origQuery}\".\\n\\nHere are 20 snippets from the Talmud.\\nYour job: Pick the Top 5 most relevant snippets that answer the question.\\n\\nOutput ONLY a JSON array of IDs. Example: [0, 4, 12, 1, 9]\\n\\nSNIPPETS:\\n${candidatesText}`;return[{json:{system_prompt:judgePrompt,candidates:candidates,user_query:origQuery}}];"
+            },
+            "name": "Prepare Judge",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1100,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "openAiApi",
+                "sendBody": true,
+                "contentType": "json",
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "value": "gpt-3.5-turbo"
+                        },
+                        {
+                            "name": "messages",
+                            "value": "={{ [ {\"role\": \"system\", \"content\": $json.system_prompt} ] }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "name": "The Judge (Reranker)",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1300,
+                300
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "YOUR_OPENAI_CREDENTIAL_ID",
+                    "name": "OpenAI account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "const judgeResp=$input.first().json.choices[0].message.content;const prevData=$('Prepare Judge').first().json;const candidates=prevData.candidates;let selectedIds=[];try{selectedIds=JSON.parse(judgeResp)}catch(e){selectedIds=[0,1,2,3,4]}const topResults=selectedIds.map(id=>candidates[id]).filter(i=>i);const sources=topResults.map((point,index)=>{const payload=point.payload||{};const text=payload.text_content||payload.content||\"\";const meta=payload;const citation=`[${meta.masechet||\"Source\"} ${meta.daf||index+1}]`;return`SOURCE ${index+1} ${citation}:\\n${text}`}).join(\"\\n\\n--------------------\\n\\n\");const analystPrompt=`Tu es un ANALYSTE TALMUDIQUE EXPERT (Iyun).\\nTa mission : Analyser les sources ci-dessous pour répondre à la question : \"${prevData.user_query}\".\\n\\nN'essaye PAS de répondre à l'utilisateur directement.\\nFAIS CECI :\\n1. Identifie les CONTRADICTIONS apparentes.\\n2. Trouve les PRINCIPES SOUS-JACENTS (Svara).\\n3. Connecte les sources entre elles.\\n\\nSOURCES BRUTES (Triees par le Juge) :\\n${sources}\\n`;return[{json:{system_prompt:analystPrompt,sources_raw:sources,user_query:prevData.user_query}}];"
+            },
+            "name": "Build Analyst Prompt",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1500,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "openAiApi",
+                "sendBody": true,
+                "contentType": "json",
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "value": "gpt-4o"
+                        },
+                        {
+                            "name": "messages",
+                            "value": "={{ [ {\"role\": \"system\", \"content\": $json.system_prompt} ] }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "name": "AI Analyst (Thinking)",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1700,
+                300
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "YOUR_OPENAI_CREDENTIAL_ID",
+                    "name": "OpenAI account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "const analysis=$input.first().json.choices[0].message.content;const prevData=$('Build Analyst Prompt').first().json;const sources=prevData.sources_raw;const query=prevData.user_query;const ravPrompt=`Tu es un RAV PEDAGOGUE ET PROFOND (Lamdan).\\nTon élève (Chavruta) t'a posé cette question : \"${query}\".\\n\\nVoici les NOTES DE RECHERCHE de ton meilleur analyste :\\n==========\\n${analysis}\\n==========\\n\\nVoici les SOURCES ORIGINALES de référence :\\n==========\\n${sources}\\n==========\\n\\nTA MISSION :\\nRédige la réponse finale.\\n1. Sois CLAIR mais PROFOND (High Voltage).\\n2. Cite toujours tes sources [Masechet Daf].\\n3. Sois chaleureux (Ton de Chavruta).\\n`;return[{json:{system_prompt:ravPrompt}}];"
+            },
+            "name": "Build Rav Prompt",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1900,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "openAiApi",
+                "sendBody": true,
+                "contentType": "json",
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "model",
+                            "value": "gpt-4o"
+                        },
+                        {
+                            "name": "messages",
+                            "value": "={{ [ {\"role\": \"system\", \"content\": $json.system_prompt} ] }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "name": "AI Rav (Final Answer)",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                2100,
+                300
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "YOUR_OPENAI_CREDENTIAL_ID",
+                    "name": "OpenAI account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "chatId": "={{$('Telegram Trigger').item.json.message.chat.id}}",
+                "text": "={{$json.choices[0].message.content}}",
+                "additionalFields": {
+                    "parse_mode": "Markdown"
+                }
+            },
+            "name": "Telegram Reply",
+            "type": "n8n-nodes-base.telegram",
+            "typeVersion": 1,
+            "position": [
+                2300,
+                300
+            ],
+            "credentials": {
+                "telegramApi": {
+                    "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+                    "name": "Telegram account"
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Telegram Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Prepare Context",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepare Context": {
+            "main": [
+                [
+                    {
+                        "node": "Query Expander",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Query Expander": {
+            "main": [
+                [
+                    {
+                        "node": "Embed Expanded Query",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Embed Expanded Query": {
+            "main": [
+                [
+                    {
+                        "node": "Qdrant Search (Broad 20)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Qdrant Search (Broad 20)": {
+            "main": [
+                [
+                    {
+                        "node": "Prepare Judge",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepare Judge": {
+            "main": [
+                [
+                    {
+                        "node": "The Judge (Reranker)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "The Judge (Reranker)": {
+            "main": [
+                [
+                    {
+                        "node": "Build Analyst Prompt",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Build Analyst Prompt": {
+            "main": [
+                [
+                    {
+                        "node": "AI Analyst (Thinking)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "AI Analyst (Thinking)": {
+            "main": [
+                [
+                    {
+                        "node": "Build Rav Prompt",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Build Rav Prompt": {
+            "main": [
+                [
+                    {
+                        "node": "AI Rav (Final Answer)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "AI Rav (Final Answer)": {
+            "main": [
+                [
+                    {
+                        "node": "Telegram Reply",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    }
+}
