@@ -21,6 +21,7 @@ build/
 n8n_data/
 qdrant_data/
 rag_data/
+rag_data_v2/
 ollama_data/
 
 # Python
