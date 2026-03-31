@@ -33,6 +33,9 @@ sentence-transformers>=3.0
 fastapi>=0.100
 uvicorn>=0.20
 
+# Claude API (optional — graceful fallback without it)
+anthropic>=0.80
+
 # Utilities
 rich>=13.0
 python-dotenv>=1.0

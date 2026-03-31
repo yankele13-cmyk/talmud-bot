@@ -481,8 +481,13 @@
 
                 let html = `<div class="results-info">${sources.length} results from ${evaluated} candidates in ${timeMs}ms</div>`;
 
-                // Summary card
-                if (data.answer?.summary) {
+                // LLM Answer card (Claude)
+                if (data.answer?.llm_answer) {
+                    html += `<div style="background:var(--surface);border:2px solid var(--accent);border-radius:var(--radius);padding:16px;margin-bottom:16px;">
+                        <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:8px;">RAV (Claude AI)</div>
+                        <div style="font-size:15px;line-height:1.7;direction:rtl;white-space:pre-wrap;">${escapeHtml(data.answer.llm_answer)}</div>
+                    </div>`;
+                } else if (data.answer?.summary) {
                     html += `<div style="background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius);padding:12px 16px;margin-bottom:12px;font-size:13px;color:var(--text-dim);">${escapeHtml(data.answer.summary)}</div>`;
                 }
 

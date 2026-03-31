@@ -2,15 +2,15 @@
 RAG Engine v3 — Production-grade Talmud search engine.
 All optimizations implemented:
 
-1. HyDE (Hypothetical Document Embedding)
+1. HyDE (Hypothetical Document Embedding) — with Claude API
 2. Hybrid Search (Vector + BM25)
 3. Small-to-Big Retrieval (search chunks, return parent context)
 4. Cross-encoder Reranking
 5. Advanced Query Expansion (Talmudic dictionary + fuzzy)
 6. Metadata Filtering (masechet, seder, text type)
-7. Extractive Answer Synthesis (highlight relevant passages)
+7. LLM Answer Synthesis — Claude generates structured Talmudic responses
 
-100% local. Zero API cost.
+Claude API optional: works without it (falls back to extractive mode).
 """
 
 import os
@@ -23,6 +23,13 @@ from collections import defaultdict
 import chromadb
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
+
+# Claude API (optional — graceful fallback if not available)
+try:
+    import anthropic
+    CLAUDE_AVAILABLE = True
+except ImportError:
+    CLAUDE_AVAILABLE = False
 
 
 # ============================================================
@@ -147,16 +154,36 @@ def expand_query(query: str) -> str:
 # ============================================================
 # 2. HyDE (Hypothetical Document Embedding)
 # ============================================================
-def generate_hyde_document(query: str) -> str:
+HYDE_SYSTEM_PROMPT = """\
+You are a Talmudic scholar. Given a question, write a short hypothetical \
+Talmud passage (in Hebrew/Aramaic) that would contain the answer. \
+Include Gemara-style language (תנו רבנן, אמר רבי, תא שמע, etc.) and \
+if relevant, add a brief Rashi-style comment. Keep it under 200 words. \
+Write ONLY the passage, no explanation."""
+
+
+def generate_hyde_document(query: str, claude_client=None) -> str:
     """
     Generate a hypothetical Talmudic passage that would answer the question.
-    No LLM needed — we use template-based generation with domain knowledge.
+    Uses Claude API if available, falls back to template-based generation.
     """
-    # Detect language
+    # Try Claude API first
+    if claude_client:
+        try:
+            response = claude_client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=400,
+                system=HYDE_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": query}],
+            )
+            return response.content[0].text
+        except Exception:
+            pass  # Fall back to templates
+
+    # Template fallback
     has_hebrew = bool(re.search(r'[\u0590-\u05FF]', query))
 
     if has_hebrew:
-        # Hebrew query → generate Hebrew hypothetical passage
         hyde = (
             f"גמרא: {query} "
             f"תנו רבנן: {query} "
@@ -165,7 +192,6 @@ def generate_hyde_document(query: str) -> str:
             f"תוספות: {query}"
         )
     else:
-        # English/French → bilingual hypothetical
         hyde = (
             f"The Gemara discusses: {query}. "
             f"Rabbi Yochanan says regarding {query}. "
@@ -256,17 +282,37 @@ def get_parent_context(collection, chunk_id: str, window: int = 1) -> str:
 
 
 # ============================================================
-# 5. EXTRACTIVE ANSWER SYNTHESIS
+# 5. ANSWER SYNTHESIS (Claude LLM + extractive fallback)
 # ============================================================
-def synthesize_answer(question: str, sources: list[dict]) -> dict:
+
+RAV_SYSTEM_PROMPT = """\
+You are a Talmudic scholar (Rav) who answers questions based ONLY on the \
+provided sources from the Talmud Bavli. Your style is that of a Yeshiva \
+teacher — clear, precise, and pedagogical.
+
+RULES:
+- Answer ONLY based on the sources provided. If the sources don't contain \
+  the answer, say so clearly.
+- Structure your answer as:
+  1. **Pshat (פשט)** — The straightforward answer in 2-3 sentences.
+  2. **Iyun (עיון)** — Deeper analysis if the sources allow it. \
+     Mention any machloket (dispute) between Tannaim/Amoraim.
+  3. **Mekorot (מקורות)** — Cite the exact references [Masechet Daf].
+- Use Hebrew/Aramaic terms naturally but explain them.
+- If Rashi or Tosafot are in the sources, incorporate their commentary.
+- Keep it concise (under 300 words).
+- Respond in the SAME LANGUAGE as the question (Hebrew, English, or French)."""
+
+
+def synthesize_answer(question: str, sources: list[dict], claude_client=None) -> dict:
     """
-    Build a structured answer with highlighted relevant passages.
-    Returns both a summary and detailed sources.
+    Build a structured answer. Uses Claude for LLM synthesis if available,
+    otherwise falls back to extractive synthesis.
     """
     if not sources:
-        return {"summary": "No relevant sources found.", "sources": []}
+        return {"summary": "No relevant sources found.", "sources": [], "llm_answer": None}
 
-    # Extract key terms from the question for highlighting
+    # Extract key terms for highlighting
     question_words = set(re.findall(r'[\w\u0590-\u05FF]{3,}', question))
 
     formatted_sources = []
@@ -274,7 +320,7 @@ def synthesize_answer(question: str, sources: list[dict]) -> dict:
         text = src.get("text", "")
         meta = src.get("metadata", {})
 
-        # Find the most relevant sentence(s)
+        # Find most relevant sentences
         sentences = re.split(r'[.!?]\s|[.!?]$|\n', text)
         scored_sentences = []
         for sent in sentences:
@@ -287,7 +333,6 @@ def synthesize_answer(question: str, sources: list[dict]) -> dict:
         scored_sentences.sort(reverse=True)
         best_sentences = [s for _, s in scored_sentences[:3]]
 
-        # Detect content sections
         has_gemara = "[GEMARA" in text
         has_rashi = "[RASHI" in text
         has_tosafot = "[TOSAFOT" in text
@@ -309,7 +354,12 @@ def synthesize_answer(question: str, sources: list[dict]) -> dict:
             "parent_context": src.get("parent_context", ""),
         })
 
-    # Build summary from top source
+    # Try Claude LLM synthesis
+    llm_answer = None
+    if claude_client:
+        llm_answer = _claude_synthesize(question, formatted_sources, claude_client)
+
+    # Extractive summary fallback
     top = formatted_sources[0]
     summary_parts = [
         f"Top result: **{top['ref']}** ({top['tractate']}, Seder {top['seder']})",
@@ -320,9 +370,36 @@ def synthesize_answer(question: str, sources: list[dict]) -> dict:
 
     return {
         "summary": " | ".join(summary_parts),
+        "llm_answer": llm_answer,
         "sources": formatted_sources,
         "total": len(formatted_sources),
     }
+
+
+def _claude_synthesize(question: str, sources: list[dict], client) -> str | None:
+    """Generate a Rav-style answer using Claude."""
+    try:
+        # Build context from sources
+        context_parts = []
+        for s in sources[:5]:
+            text = s["full_text"][:2000]
+            context_parts.append(f"[{s['ref']} — {s['tractate']}]\n{text}")
+
+        context = "\n\n---\n\n".join(context_parts)
+
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
+            system=RAV_SYSTEM_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": f"SOURCES:\n{context}\n\nQUESTION: {question}",
+            }],
+        )
+        return response.content[0].text
+    except Exception as e:
+        print(f"Claude synthesis failed: {e}")
+        return None
 
 
 # ============================================================
@@ -339,6 +416,7 @@ class TalmudRAGEngine:
         collection_name: str = "shas_complete",
         embed_model: str = "paraphrase-multilingual-MiniLM-L12-v2",
         reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        anthropic_api_key: str | None = None,
     ):
         self.persist_dir = persist_dir
         self.collection_name = collection_name
@@ -348,6 +426,13 @@ class TalmudRAGEngine:
         self.bm25_index = None
         self.embed_model = embed_model
         self.reranker_model = reranker_model
+
+        # Claude API client (optional)
+        self.claude_client = None
+        api_key = anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if api_key and CLAUDE_AVAILABLE:
+            self.claude_client = anthropic.Anthropic(api_key=api_key)
+            print("Claude API enabled (Haiku for HyDE + synthesis)")
 
     def load(self):
         """Load models and indexes."""
@@ -423,9 +508,9 @@ class TalmudRAGEngine:
         # Step 1: Query expansion
         expanded = expand_query(question)
 
-        # Step 2: Embed (with optional HyDE)
+        # Step 2: Embed (with optional HyDE — uses Claude if available)
         if use_hyde:
-            hyde_doc = generate_hyde_document(question)
+            hyde_doc = generate_hyde_document(question, claude_client=self.claude_client)
             # Combine original + expanded + hyde for richer embedding
             embed_text = f"{expanded} {hyde_doc}"
         else:
@@ -529,8 +614,8 @@ class TalmudRAGEngine:
                 parent = get_parent_context(self.collection, r["id"], window=1)
                 r["parent_context"] = parent
 
-        # Step 8: Answer synthesis
-        answer = synthesize_answer(question, top_results)
+        # Step 8: Answer synthesis (Claude LLM if available)
+        answer = synthesize_answer(question, top_results, claude_client=self.claude_client)
 
         elapsed = time.time() - start_time
 
@@ -553,4 +638,5 @@ class TalmudRAGEngine:
             "chunks": count,
             "bm25_index_size": bm25_size,
             "persist_dir": self.persist_dir,
+            "claude_enabled": self.claude_client is not None,
         }
