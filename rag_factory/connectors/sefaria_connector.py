@@ -125,22 +125,26 @@ class SefariaConnector(BaseConnector):
                             "lengths": node.get("lengths", []),
                         })
 
+    def _is_talmud_bavli(self, tractate: dict) -> bool:
+        """Check if a tractate is Talmud Bavli (uses daf system)."""
+        category = tractate.get("category", "")
+        return "Talmud" in category and "Bavli" in category
+
     def _get_daf_list(self, tractate: dict) -> list[str]:
         """Generate list of all page references for a tractate."""
         title = tractate["title"]
-        address_types = tractate.get("addressTypes", [])
         refs = []
 
-        if "Talmud" in address_types:
-            # Talmud uses daf system (2a, 2b, 3a, 3b, ...)
+        if self._is_talmud_bavli(tractate):
+            # Talmud Bavli uses daf system (2a, 2b, 3a, 3b, ...)
+            # "length" from Shape API = total number of amudim (sides)
             length = tractate.get("length", 0)
             if not length and tractate.get("lengths"):
                 length = tractate["lengths"][0] if tractate["lengths"] else 0
-            # Sefaria "length" for Talmud = number of amudim (sides)
-            # Daf 2a = amud 1, Daf 2b = amud 2, etc.
-            num_dafim = (length // 2) + 2  # starts at daf 2
+            # Total amudim / 2 = number of dafim. Starts at daf 2.
+            num_dafim = (length // 2) + 1  # +1 because daf 2 is first
             max_pages = self.config.max_pages_per_tractate
-            for daf_num in range(2, num_dafim + 1):
+            for daf_num in range(2, 2 + num_dafim):
                 if max_pages and len(refs) >= max_pages:
                     break
                 refs.append(f"{title}.{daf_num}a")
@@ -210,6 +214,8 @@ class SefariaConnector(BaseConnector):
         commentary = data.get("commentary", [])
         parts = []
         for c in commentary:
+            if not isinstance(c, dict):
+                continue
             if c.get("collectiveTitle") == name or c.get("indexTitle", "").startswith(name):
                 he_text = c.get("he", "")
                 if he_text:
