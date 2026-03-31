@@ -3,9 +3,10 @@ Sefaria API Connector — Fetches the entire Sefaria library (Talmud, Tanakh, Mi
 via their free public API. No API key needed.
 
 Endpoints used:
-  - GET /api/index              → Full table of contents (all texts available)
-  - GET /api/texts/{ref}        → Get text content with commentary
-  - GET /api/related/{ref}      → Get related content (links, commentaries)
+  - GET /api/index                → Full table of contents (all texts available)
+  - GET /api/shape/Talmud/Bavli   → Exact structure of all Talmud tractates (63 tractates)
+  - GET /api/texts/{ref}          → Get text content with commentary (v1, used for commentary)
+  - GET /api/v2/index/{title}     → Full metadata for a specific book
 """
 
 import json
@@ -60,10 +61,36 @@ class SefariaConnector(BaseConnector):
         resp.raise_for_status()
         self._toc_cache = resp.json()
 
+        # Also load Shape API for Talmud (gives exact daf counts for all 63 tractates)
+        if any("Talmud" in c for c in self.config.categories) or not self.config.categories:
+            try:
+                shape_resp = self.session.get(
+                    f"{SEFARIA_BASE}/api/shape/Talmud/Bavli", timeout=30
+                )
+                if shape_resp.ok:
+                    self._shape_cache = shape_resp.json()
+            except Exception:
+                self._shape_cache = []
+
     def _get_talmud_tractates(self) -> list[dict]:
-        """Extract all Talmud tractates from the ToC."""
+        """Extract all Talmud tractates from the ToC, enriched with Shape data."""
         tractates = []
         self._walk_toc(self._toc_cache, [], tractates)
+
+        # Enrich with Shape data if available (gives exact chapter/daf counts)
+        if hasattr(self, "_shape_cache") and self._shape_cache:
+            shape_by_title = {}
+            for item in self._shape_cache:
+                if isinstance(item, dict):
+                    shape_by_title[item.get("title", "")] = item
+
+            for t in tractates:
+                shape = shape_by_title.get(t["title"])
+                if shape:
+                    # Shape gives chapters array with lengths
+                    t["chapters"] = shape.get("chapters", [])
+                    t["length"] = shape.get("length", t.get("length", 0))
+
         return tractates
 
     def _walk_toc(self, nodes: list, path: list[str], result: list[dict]):
