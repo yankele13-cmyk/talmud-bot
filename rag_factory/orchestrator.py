@@ -25,6 +25,7 @@ from llama_index.llms.ollama import Ollama
 
 from rag_factory.connectors.base import BaseConnector, DatabaseProfile
 from rag_factory.connectors.factory import create_connector
+from rag_factory.connectors.sefaria_connector import SefariaConnector
 from rag_factory.agents.schema_analyzer import SchemaAnalyzer
 from rag_factory.agents.chunker import Chunker
 from rag_factory.agents.rag_builder import RAGBuilder
@@ -70,16 +71,30 @@ class RAGFactoryOrchestrator:
             request_timeout=180.0,
         )
 
+    @property
+    def _is_sefaria(self) -> bool:
+        return self.state.db_url.lower().startswith("sefaria://")
+
     def run(self) -> PipelineState:
         """Execute the full pipeline."""
-        steps = [
-            ("Connecting to database", self._step_connect),
-            ("Analyzing database schema", self._step_analyze_schema),
-            ("Generating RAG strategy with AI", self._step_generate_strategy),
-            ("Building documents from data", self._step_build_documents),
-            ("Creating vector index", self._step_build_index),
-            ("Saving configuration", self._step_save),
-        ]
+        if self._is_sefaria:
+            # Sefaria: we know the structure — skip LLM analysis, fetch directly
+            steps = [
+                ("Connecting to Sefaria API", self._step_connect),
+                ("Analyzing Sefaria library", self._step_analyze_schema),
+                ("Fetching texts from Sefaria", self._step_sefaria_fetch),
+                ("Creating vector index", self._step_build_index),
+                ("Saving configuration", self._step_save),
+            ]
+        else:
+            steps = [
+                ("Connecting to database", self._step_connect),
+                ("Analyzing database schema", self._step_analyze_schema),
+                ("Generating RAG strategy with AI", self._step_generate_strategy),
+                ("Building documents from data", self._step_build_documents),
+                ("Creating vector index", self._step_build_index),
+                ("Saving configuration", self._step_save),
+            ]
 
         console.print(Panel(
             "[bold cyan]RAG FACTORY[/bold cyan] — Autonomous RAG Builder\n"
@@ -132,6 +147,61 @@ class RAGFactoryOrchestrator:
                 f"    - [yellow]{t['table']}[/yellow] "
                 f"({t.get('chunk_strategy', '?')}, priority: {t.get('priority', '?')})"
             )
+
+    def _step_sefaria_fetch(self):
+        """Fetch all texts from Sefaria and convert to LlamaIndex Documents."""
+        from llama_index.core.schema import Document
+
+        connector: SefariaConnector = self.state.connector
+        profile = self.state.profile
+        all_docs = []
+
+        for table in profile.tables:
+            console.print(f"  [dim]Fetching {table.name} ({table.row_count} pages)...[/dim]")
+            raw_docs = connector.extract_documents(table.name)
+
+            for raw in raw_docs:
+                text = raw.get("text", "")
+                if not text.strip():
+                    continue
+
+                all_docs.append(Document(
+                    text=text,
+                    metadata={
+                        "source_table": table.name,
+                        "ref": raw.get("ref", ""),
+                        "heTitle": raw.get("heTitle", ""),
+                        "category": raw.get("category", ""),
+                        "url": raw.get("url", ""),
+                        "language": raw.get("language", "he"),
+                        "has_rashi": raw.get("has_rashi", False),
+                        "has_tosafot": raw.get("has_tosafot", False),
+                    },
+                ))
+
+            console.print(f"    [green]{len(raw_docs)} pages fetched[/green]")
+
+        self.state.documents = all_docs
+        console.print(f"  [dim]Total: {len(all_docs)} documents ready for indexing[/dim]")
+
+        # Save a Sefaria-specific strategy for reference
+        self.state.strategy = {
+            "source": "sefaria_api",
+            "tables_to_index": [
+                {
+                    "table": t.name,
+                    "priority": "high",
+                    "chunk_strategy": "row_per_doc",
+                    "doc_count": t.row_count,
+                }
+                for t in profile.tables
+            ],
+            "embedding_config": {
+                "recommended_chunk_size": 2048,
+                "recommended_overlap": 200,
+                "language": connector.config.language,
+            },
+        }
 
     def _step_build_documents(self):
         chunker = Chunker(

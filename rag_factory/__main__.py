@@ -39,6 +39,37 @@ def cmd_build(args):
         _chat_loop(result.query_engine)
 
 
+def cmd_sefaria(args):
+    """Shortcut to build RAG from Sefaria texts."""
+    from rag_factory.connectors.sefaria_connector import SefariaConfig
+    from rag_factory.orchestrator import RAGFactoryOrchestrator, PipelineState
+
+    # Determine if scope is a category or a specific tractate
+    scope = args.scope.lower()
+    known_categories = {"talmud", "tanakh", "mishnah", "tosefta", "midrash", "halakhah", "kabbalah", "liturgy", "all"}
+
+    if scope in known_categories:
+        db_url = f"sefaria://{scope}"
+    else:
+        # Assume it's a tractate name like "Berakhot"
+        db_url = f"sefaria://talmud/{args.scope}"
+
+    state = PipelineState(
+        db_url=db_url,
+        llm_model=args.llm_model,
+        embed_model=args.embed_model,
+        ollama_url=args.ollama_url,
+        persist_dir=args.persist_dir,
+        collection_name=args.collection,
+    )
+
+    orchestrator = RAGFactoryOrchestrator(state)
+    result = orchestrator.run()
+
+    if result.query_engine and args.interactive:
+        _chat_loop(result.query_engine)
+
+
 def cmd_chat(args):
     """Chat with an existing RAG."""
     from rag_factory.agents.rag_builder import RAGBuilder
@@ -135,9 +166,28 @@ def main():
 
     # BUILD
     build_parser = subparsers.add_parser("build", help="Build a RAG from a database")
-    build_parser.add_argument("db_url", help="Database URL (postgresql://..., mongodb://..., sqlite:///...)")
+    build_parser.add_argument("db_url", help=(
+        "Database URL. Examples:\n"
+        "  postgresql://user:pass@localhost:5432/mydb\n"
+        "  mongodb://localhost:27017 --db-name mydb\n"
+        "  sqlite:///path/to/db.sqlite\n"
+        "  sefaria://talmud           (all Talmud Bavli)\n"
+        "  sefaria://talmud/Berakhot  (specific tractate)\n"
+        "  sefaria://all              (entire library)"
+    ))
     build_parser.add_argument("--db-name", help="Database name (required for MongoDB)")
     build_parser.add_argument("--interactive", "-i", action="store_true", help="Start chat after build")
+
+    # SEFARIA (shortcut)
+    sefaria_parser = subparsers.add_parser("sefaria", help="Build RAG from Sefaria texts (shortcut)")
+    sefaria_parser.add_argument("scope", nargs="?", default="talmud", help=(
+        "What to index: 'talmud', 'tanakh', 'mishnah', 'all', "
+        "or a specific tractate like 'Berakhot'"
+    ))
+    sefaria_parser.add_argument("--language", default="he", choices=["he", "en", "both"], help="Text language")
+    sefaria_parser.add_argument("--no-commentary", action="store_true", help="Skip Rashi/Tosafot")
+    sefaria_parser.add_argument("--max-pages", type=int, default=0, help="Max pages per tractate (0=all)")
+    sefaria_parser.add_argument("--interactive", "-i", action="store_true", help="Start chat after build")
 
     # CHAT
     subparsers.add_parser("chat", help="Chat with an existing RAG")
@@ -149,6 +199,8 @@ def main():
 
     if args.command == "build":
         cmd_build(args)
+    elif args.command == "sefaria":
+        cmd_sefaria(args)
     elif args.command == "chat":
         cmd_chat(args)
     elif args.command == "info":
