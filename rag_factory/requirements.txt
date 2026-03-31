@@ -23,6 +23,16 @@ pydantic>=2.0
 # HTTP (for Sefaria API)
 requests>=2.31
 
+# Hybrid search (BM25 keyword matching)
+rank-bm25>=0.2.2
+
+# Embeddings (local, CPU, no API key)
+sentence-transformers>=3.0
+
+# Web server
+fastapi>=0.100
+uvicorn>=0.20
+
 # Utilities
 rich>=13.0
 python-dotenv>=1.0

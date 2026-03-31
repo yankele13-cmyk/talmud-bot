@@ -354,9 +354,12 @@
     </div>
 
     <div class="quick-questions" id="quickQuestions">
-        <span class="quick-q" onclick="quickSearch(this)">What is krias shema?</span>
-        <span class="quick-q" onclick="quickSearch(this)">Geula and Tefila?</span>
-        <span class="quick-q" onclick="quickSearch(this)">Beit Shammai vs Beit Hillel</span>
+        <span class="quick-q" onclick="quickSearch(this)">מהו הזמן של קריאת שמע?</span>
+        <span class="quick-q" onclick="quickSearch(this)">גאולה לתפילה</span>
+        <span class="quick-q" onclick="quickSearch(this)">ל״ט מלאכות שבת</span>
+        <span class="quick-q" onclick="quickSearch(this)">Beit Shammai vs Hillel</span>
+        <span class="quick-q" onclick="quickSearch(this)">שור שנגח</span>
+        <span class="quick-q" onclick="quickSearch(this)">כתובה של אשה</span>
     </div>
 
     <div class="results" id="results">
@@ -370,6 +373,7 @@
     <script>
         const API = '';
         let currentFilter = '';
+        let currentSeder = '';
 
         // Init
         async function init() {
@@ -380,7 +384,8 @@
 
                 if (data.status === 'ready') {
                     el.className = 'status-badge status-ready';
-                    el.textContent = `${data.chunks.toLocaleString()} chunks indexed`;
+                    const ver = data.version || 'v2';
+                    el.textContent = `${ver} | ${data.chunks.toLocaleString()} chunks`;
                     loadTractates();
                 } else if (data.status === 'loading') {
                     el.className = 'status-badge status-loading';
@@ -402,6 +407,19 @@
                 const data = await res.json();
                 const bar = document.getElementById('filterBar');
 
+                // Add seder filters first
+                if (data.sedarim) {
+                    for (const s of data.sedarim) {
+                        const chip = document.createElement('span');
+                        chip.className = 'filter-chip';
+                        chip.dataset.seder = s;
+                        chip.textContent = s;
+                        chip.style.borderColor = '#e2b714';
+                        chip.onclick = function() { setSederFilter(this); };
+                        bar.appendChild(chip);
+                    }
+                }
+
                 for (const t of data.tractates) {
                     const chip = document.createElement('span');
                     chip.className = 'filter-chip';
@@ -417,6 +435,14 @@
             document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
             el.classList.add('active');
             currentFilter = el.dataset.tractate || '';
+            currentSeder = '';
+        }
+
+        function setSederFilter(el) {
+            document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+            el.classList.add('active');
+            currentSeder = el.dataset.seder || '';
+            currentFilter = '';
         }
 
         function quickSearch(el) {
@@ -438,44 +464,81 @@
             try {
                 let url = `${API}/api/search?q=${encodeURIComponent(q)}&top_k=5`;
                 if (currentFilter) url += `&tractate=${encodeURIComponent(currentFilter)}`;
+                if (currentSeder) url += `&seder=${encodeURIComponent(currentSeder)}`;
 
                 const res = await fetch(url);
                 const data = await res.json();
 
-                if (data.results.length === 0) {
+                // v3 format: data.answer.sources or fallback to data.results
+                const sources = data.answer?.sources || data.results || [];
+                const timeMs = data.time_ms || 0;
+                const evaluated = data.candidates_evaluated || sources.length;
+
+                if (sources.length === 0) {
                     results.innerHTML = '<div class="empty-state"><p>No results found</p></div>';
                     return;
                 }
 
-                let html = `<div class="results-info">${data.count} results in ${data.time_ms}ms</div>`;
+                let html = `<div class="results-info">${sources.length} results from ${evaluated} candidates in ${timeMs}ms</div>`;
 
-                for (const r of data.results) {
-                    const meta = r.metadata || {};
-                    const hasRashi = r.text.includes('[RASHI');
-                    const hasTosafot = r.text.includes('[TOSAFOT');
+                // Summary card
+                if (data.answer?.summary) {
+                    html += `<div style="background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius);padding:12px 16px;margin-bottom:12px;font-size:13px;color:var(--text-dim);">${escapeHtml(data.answer.summary)}</div>`;
+                }
 
-                    // Format text with section markers
-                    let text = escapeHtml(r.text);
-                    text = text.replace(/\[GEMARA[^\]]*\]/g, '<span class="section-marker">GEMARA</span>');
-                    text = text.replace(/\[RASHI[^\]]*\]/g, '<span class="section-marker">RASHI</span>');
-                    text = text.replace(/\[TOSAFOT[^\]]*\]/g, '<span class="section-marker">TOSAFOT</span>');
+                for (const r of sources) {
+                    const ref = r.ref || r.metadata?.ref || r.id || '';
+                    const tractate = r.tractate || r.metadata?.tractate || '';
+                    const seder = r.seder || '';
+                    const urlLink = r.url || r.metadata?.url || '#';
+                    const score = r.rerank_score || 0;
+                    const biScore = r.bi_score || 0;
+                    const bm25Score = r.bm25_score || 0;
+                    const text = r.full_text || r.text || '';
+                    const hasRashi = r.has_rashi || text.includes('[RASHI');
+                    const hasTosafot = r.has_tosafot || text.includes('[TOSAFOT');
+                    const keyPassages = r.key_passages || [];
+                    const cardId = (ref + '_' + (r.rank||0)).replace(/[^a-zA-Z0-9]/g, '_');
+
+                    // Format main text
+                    let displayText = escapeHtml(text);
+                    displayText = displayText.replace(/\[GEMARA[^\]]*\]/g, '<span class="section-marker">GEMARA</span>');
+                    displayText = displayText.replace(/\[RASHI[^\]]*\]/g, '<span class="section-marker">RASHI</span>');
+                    displayText = displayText.replace(/\[TOSAFOT[^\]]*\]/g, '<span class="section-marker">TOSAFOT</span>');
+
+                    // Key passages highlight
+                    let keyHtml = '';
+                    if (keyPassages.length > 0) {
+                        keyHtml = '<div style="padding:8px 16px;background:rgba(226,183,20,0.05);border-top:1px solid var(--border);font-size:13px;">';
+                        keyHtml += '<span style="color:var(--accent);font-weight:700;font-size:11px;">KEY PASSAGES:</span>';
+                        for (const p of keyPassages.slice(0, 2)) {
+                            keyHtml += `<p style="margin:4px 0;color:var(--text);direction:rtl;">${escapeHtml(p.substring(0, 200))}${p.length > 200 ? '...' : ''}</p>`;
+                        }
+                        keyHtml += '</div>';
+                    }
+
+                    // Score breakdown
+                    const scoreInfo = `Rerank: ${score.toFixed(2)} | Vec: ${biScore.toFixed(3)} | BM25: ${bm25Score.toFixed(1)}`;
 
                     html += `
                     <div class="result-card">
                         <div class="result-header">
-                            <span class="result-ref">${meta.ref || r.id}</span>
-                            <span class="result-score">${r.rerank_score?.toFixed(2)}</span>
+                            <span class="result-ref">${ref}</span>
+                            <span class="result-score">${score.toFixed(2)}</span>
                         </div>
                         <div class="result-badges">
-                            <span class="badge badge-tractate">${meta.tractate || ''}</span>
+                            ${tractate ? `<span class="badge badge-tractate">${tractate}</span>` : ''}
+                            ${seder ? `<span class="badge" style="background:rgba(255,255,255,0.05);color:var(--text-dim);">${seder}</span>` : ''}
                             <span class="badge badge-gemara">Gemara</span>
                             ${hasRashi ? '<span class="badge badge-rashi">Rashi</span>' : ''}
                             ${hasTosafot ? '<span class="badge badge-tosafot">Tosafot</span>' : ''}
                         </div>
-                        <div class="result-text" id="text-${r.id}">${text}</div>
+                        ${keyHtml}
+                        <div class="result-text" id="text-${cardId}">${displayText}</div>
                         <div class="result-footer">
-                            <a class="result-link" href="${meta.url || '#'}" target="_blank">Sefaria &rarr;</a>
-                            <button class="expand-btn" onclick="toggleExpand('${r.id}')">Expand</button>
+                            <a class="result-link" href="${urlLink}" target="_blank">Sefaria &rarr;</a>
+                            <span style="font-size:11px;color:var(--text-dim);">${scoreInfo}</span>
+                            <button class="expand-btn" onclick="toggleExpand('${cardId}')">Expand</button>
                         </div>
                     </div>`;
                 }
