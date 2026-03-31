@@ -30,3 +30,4 @@ __pycache__/
 *.pyc
 *.egg-info/
 .venv/
+shas_indexation.log
