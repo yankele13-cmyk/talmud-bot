@@ -297,6 +297,8 @@ def main():
         # Embed and store
         if all_chunks:
             console.print(f"    Embedding {len(all_chunks)} chunks (BGE-M3)...")
+            # Re-get collection reference to avoid stale ID issues
+            collection = client.get_or_create_collection(COLLECTION_NAME, metadata={"hnsw:space": "cosine"})
             for i in range(0, len(all_chunks), BATCH_SIZE):
                 batch = all_chunks[i:i + BATCH_SIZE]
                 texts = [c["enriched_text"] for c in batch]
@@ -313,7 +315,6 @@ def main():
                     "has_tosafot": c["type"] == "tosafot",
                 } for c in batch]
 
-                # Store enriched text (with context prefix) as document
                 collection.add(ids=ids, documents=texts, embeddings=embeddings, metadatas=metas)
 
             total_chunks += len(all_chunks)
