@@ -1,39 +1,30 @@
 """
-Talmud RAG API v3 — FastAPI backend with full optimization suite.
-Uses engine_v3: HyDE, Hybrid Search, Small-to-Big, Cross-Encoder Reranking.
+Talmud RAG API v5 — FastAPI backend.
+Qdrant + BGE-M3 + bge-reranker-v2-m3 + Claude Sonnet synthesis.
+SSE streaming for real-time Rav responses.
 """
 
 import os
 import sys
+import json
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, Query
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
-from rag_factory.engine_v4 import TalmudRAGEngine, SEDER_MAP
+from fastapi import FastAPI, Query
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 
-# ============================================================
-# CONFIG
-# ============================================================
-PERSIST_CANDIDATES = [
-    ("rag_data_shas", "shas_complete"),
-    ("rag_data_v2", "talmud_v2"),
-    ("rag_data", "sefaria_talmud"),
-]
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from rag_factory.engine_v5 import TalmudRAGEngine, SEDER_MAP
 
 # ============================================================
 # APP
 # ============================================================
-app = FastAPI(title="Talmud RAG API", version="4.0")
+app = FastAPI(title="Talmud RAG API", version="5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -48,38 +39,35 @@ db_info = {"status": "loading"}
 
 def init_engine():
     global engine, db_info
-
-    for dir_name, coll_name in PERSIST_CANDIDATES:
-        full_path = os.path.join(BASE_DIR, dir_name)
-        if os.path.exists(full_path):
-            try:
-                e = TalmudRAGEngine(
-                    persist_dir=full_path,
-                    collection_name=coll_name,
-                )
-                e.load()
-                stats = e.get_stats()
-                if stats["chunks"] > 0:
-                    engine = e
-                    db_info = {
-                        "status": "ready",
-                        "version": "v3",
-                        "features": [
-                            "HyDE (Hypothetical Document Embedding)",
-                            "Hybrid Search (Vector + BM25)",
-                            "Cross-Encoder Reranking",
-                            "Small-to-Big Retrieval",
-                            "Query Expansion (Talmudic Dictionary)",
-                            "Metadata Filtering (Masechet, Seder)",
-                        ],
-                        **stats,
-                    }
-                    print(f"Engine v3 ready: {stats['chunks']} chunks, BM25: {stats['bm25_index_size']}")
-                    return
-            except Exception as e:
-                print(f"Could not load {coll_name}: {e}")
-
-    db_info = {"status": "no_data", "message": "No indexed data found. Run indexation first."}
+    try:
+        e = TalmudRAGEngine(
+            qdrant_url=os.environ.get("QDRANT_HOST", "localhost"),
+            qdrant_port=int(os.environ.get("QDRANT_PORT", 6333)),
+        )
+        e.load()
+        stats = e.get_stats()
+        if stats["chunks"] > 0:
+            engine = e
+            db_info = {
+                "status": "ready",
+                "version": "v5",
+                "features": [
+                    "BGE-M3 embeddings (1024d, 8192 tokens)",
+                    "BGE-Reranker-v2-M3 (568M, multilingual)",
+                    "Qdrant hybrid search (dense + sparse + RRF)",
+                    "HyDE (3-doc average, Claude Haiku)",
+                    "Contextual Retrieval",
+                    "Rav synthesis (Claude Sonnet, CoT + citations)",
+                    "SSE streaming",
+                ],
+                **stats,
+            }
+        else:
+            engine = e  # Keep engine for indexing even if empty
+            db_info = {"status": "empty", "message": "Qdrant connected but no data. Run indexation.", **stats}
+    except Exception as ex:
+        db_info = {"status": "error", "message": str(ex)}
+        print(f"Engine init failed: {ex}")
 
 
 # ============================================================
@@ -97,45 +85,59 @@ async def status():
 
 @app.get("/api/search")
 async def api_search(
-    q: str = Query(..., description="Question to search"),
+    q: str = Query(..., description="Question"),
     top_k: int = Query(5, ge=1, le=20),
-    tractate: str = Query(None, description="Filter by masechet"),
-    seder: str = Query(None, description="Filter by seder (Moed, Nashim, etc.)"),
-    hyde: bool = Query(True, description="Use HyDE"),
-    bm25: bool = Query(True, description="Use BM25 hybrid search"),
-    context: bool = Query(True, description="Include parent context"),
+    tractate: str = Query(None),
+    seder: str = Query(None),
+    hyde: bool = Query(True),
+    context: bool = Query(True),
 ):
     if not engine:
         return {"error": "Engine not loaded", "results": []}
 
-    result = engine.search(
-        question=q,
-        top_k=top_k,
-        tractate=tractate,
-        seder=seder,
-        use_hyde=hyde,
-        use_bm25=bm25,
-        include_context=context,
+    return engine.search(
+        question=q, top_k=top_k, tractate=tractate,
+        seder=seder, use_hyde=hyde, include_context=context,
     )
 
-    return result
+
+@app.get("/api/search/stream")
+async def api_search_stream(
+    q: str = Query(...),
+    top_k: int = Query(5, ge=1, le=20),
+    tractate: str = Query(None),
+    seder: str = Query(None),
+):
+    """SSE endpoint — streams sources then Claude tokens."""
+    if not engine:
+        return {"error": "Engine not loaded"}
+
+    async def generate():
+        for event in engine.search_stream(
+            question=q, top_k=top_k, tractate=tractate, seder=seder,
+        ):
+            yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @app.get("/api/tractates")
 async def list_tractates():
-    if not engine or not engine.collection:
+    if not engine or not engine.qdrant:
         return {"tractates": [], "sedarim": list(SEDER_MAP.keys())}
-
     try:
-        sample = engine.collection.get(limit=10000, include=["metadatas"])
+        # Scroll a sample to find unique tractates
+        points, _ = engine.qdrant.scroll(
+            collection_name=engine.collection_name,
+            limit=100,
+            with_payload=["tractate"],
+        )
         tractates = set()
-        for m in sample["metadatas"]:
-            if m and "tractate" in m:
-                tractates.add(m["tractate"])
-        return {
-            "tractates": sorted(tractates),
-            "sedarim": list(SEDER_MAP.keys()),
-        }
+        for p in points:
+            if p.payload and "tractate" in p.payload:
+                tractates.add(p.payload["tractate"])
+        return {"tractates": sorted(tractates), "sedarim": list(SEDER_MAP.keys())}
     except Exception:
         return {"tractates": [], "sedarim": list(SEDER_MAP.keys())}
 
@@ -145,10 +147,9 @@ async def list_sedarim():
     return SEDER_MAP
 
 
-# Serve frontend
+# Frontend
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
 
 @app.get("/")
 async def index():
