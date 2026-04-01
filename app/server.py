@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
-from rag_factory.engine_v3 import TalmudRAGEngine, SEDER_MAP
+from rag_factory.engine_v4 import TalmudRAGEngine, SEDER_MAP
 
 # ============================================================
 # CONFIG
@@ -33,7 +33,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # ============================================================
 # APP
 # ============================================================
-app = FastAPI(title="Talmud RAG API", version="3.0")
+app = FastAPI(title="Talmud RAG API", version="4.0")
 
 app.add_middleware(
     CORSMiddleware,

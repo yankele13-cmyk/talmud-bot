@@ -31,3 +31,4 @@ __pycache__/
 *.egg-info/
 .venv/
 shas_indexation.log
+rag_data_v4/
