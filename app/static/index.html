@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#0f0f1a">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+    <link rel="apple-touch-icon" href="/static/icon-512.png">
+    <title>Talmud RAG</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #0f0f1a;
+            --surface: #1a1a2e;
+            --surface2: #252540;
+            --accent: #e2b714;
+            --accent2: #c49b0e;
+            --text: #e8e8e8;
+            --text-dim: #8888aa;
+            --rashi: #4a9eff;
+            --tosafot: #ff6b6b;
+            --gemara: #50fa7b;
+            --border: #333355;
+            --radius: 12px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header */
+        .header {
+            background: var(--surface);
+            padding: 16px 20px;
+            text-align: center;
+            border-bottom: 2px solid var(--accent);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header h1 {
+            font-size: 22px;
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        .header .subtitle {
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-top: 2px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            margin-top: 6px;
+        }
+
+        .status-ready { background: #1a3a1a; color: #50fa7b; }
+        .status-loading { background: #3a3a1a; color: #e2b714; }
+        .status-error { background: #3a1a1a; color: #ff6b6b; }
+
+        /* Search */
+        .search-container {
+            padding: 16px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .search-box {
+            display: flex;
+            gap: 8px;
+        }
+
+        .search-input {
+            flex: 1;
+            padding: 14px 16px;
+            border: 2px solid var(--border);
+            border-radius: var(--radius);
+            background: var(--bg);
+            color: var(--text);
+            font-size: 16px;
+            direction: rtl;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .search-input:focus {
+            border-color: var(--accent);
+        }
+
+        .search-input::placeholder {
+            color: var(--text-dim);
+        }
+
+        .search-btn {
+            padding: 14px 20px;
+            background: var(--accent);
+            color: #000;
+            border: none;
+            border-radius: var(--radius);
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.2s;
+        }
+
+        .search-btn:hover { background: var(--accent2); }
+        .search-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Filter bar */
+        .filter-bar {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .filter-bar::-webkit-scrollbar { display: none; }
+
+        .filter-chip {
+            padding: 6px 14px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 13px;
+            background: var(--surface2);
+            color: var(--text-dim);
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+        }
+
+        .filter-chip.active {
+            background: var(--accent);
+            color: #000;
+            border-color: var(--accent);
+            font-weight: 600;
+        }
+
+        /* Quick questions */
+        .quick-questions {
+            padding: 12px 16px;
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .quick-questions::-webkit-scrollbar { display: none; }
+
+        .quick-q {
+            padding: 8px 14px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            color: var(--text);
+            font-size: 13px;
+            cursor: pointer;
+            white-space: nowrap;
+            direction: rtl;
+            transition: all 0.2s;
+        }
+
+        .quick-q:hover { border-color: var(--accent); }
+
+        /* Results */
+        .results {
+            flex: 1;
+            padding: 16px;
+            overflow-y: auto;
+        }
+
+        .results-info {
+            font-size: 13px;
+            color: var(--text-dim);
+            margin-bottom: 12px;
+            text-align: center;
+        }
+
+        .result-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            margin-bottom: 12px;
+            overflow: hidden;
+            transition: border-color 0.2s;
+        }
+
+        .result-card:first-child {
+            border-color: var(--accent);
+        }
+
+        .result-header {
+            padding: 12px 16px;
+            background: var(--surface2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .result-ref {
+            font-weight: 700;
+            color: var(--accent);
+            font-size: 15px;
+        }
+
+        .result-score {
+            font-size: 12px;
+            color: var(--text-dim);
+            background: var(--bg);
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .result-badges {
+            display: flex;
+            gap: 6px;
+            padding: 0 16px;
+            margin-top: 8px;
+        }
+
+        .badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+
+        .badge-gemara { background: rgba(80,250,123,0.15); color: var(--gemara); }
+        .badge-rashi { background: rgba(74,158,255,0.15); color: var(--rashi); }
+        .badge-tosafot { background: rgba(255,107,107,0.15); color: var(--tosafot); }
+        .badge-tractate { background: rgba(226,183,20,0.15); color: var(--accent); }
+
+        .result-text {
+            padding: 12px 16px;
+            font-size: 15px;
+            line-height: 1.7;
+            direction: rtl;
+            max-height: 200px;
+            overflow-y: auto;
+            color: var(--text);
+        }
+
+        .result-text .section-marker {
+            color: var(--accent);
+            font-weight: 700;
+            display: block;
+            margin-top: 8px;
+        }
+
+        .result-footer {
+            padding: 8px 16px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .result-link {
+            color: var(--rashi);
+            text-decoration: none;
+            font-size: 13px;
+        }
+
+        .expand-btn {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text-dim);
+            padding: 4px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-dim);
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-dim);
+        }
+
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        /* Responsive */
+        @media (max-width: 400px) {
+            .search-input { font-size: 15px; padding: 12px 14px; }
+            .search-btn { padding: 12px 16px; }
+            .result-text { font-size: 14px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Talmud RAG</h1>
+        <div class="subtitle">Gemara + Rashi + Tosafot</div>
+        <div id="status" class="status-badge status-loading">Loading...</div>
+    </div>
+
+    <div class="search-container">
+        <div class="search-box">
+            <input
+                type="text"
+                id="searchInput"
+                class="search-input"
+                placeholder="...Ask about the Talmud"
+                autocomplete="off"
+            >
+            <button id="searchBtn" class="search-btn" onclick="doSearch()">Search</button>
+        </div>
+        <div id="filterBar" class="filter-bar">
+            <span class="filter-chip active" data-tractate="" onclick="setFilter(this)">All</span>
+        </div>
+    </div>
+
+    <div class="quick-questions" id="quickQuestions">
+        <span class="quick-q" onclick="quickSearch(this)">מהו הזמן של קריאת שמע?</span>
+        <span class="quick-q" onclick="quickSearch(this)">גאולה לתפילה</span>
+        <span class="quick-q" onclick="quickSearch(this)">ל״ט מלאכות שבת</span>
+        <span class="quick-q" onclick="quickSearch(this)">Beit Shammai vs Hillel</span>
+        <span class="quick-q" onclick="quickSearch(this)">שור שנגח</span>
+        <span class="quick-q" onclick="quickSearch(this)">כתובה של אשה</span>
+    </div>
+
+    <div class="results" id="results">
+        <div class="empty-state">
+            <div class="icon">&#x1F4DC;</div>
+            <p>Search the Talmud Bavli</p>
+            <p style="font-size: 13px; margin-top: 8px;">Gemara, Rashi & Tosafot indexed</p>
+        </div>
+    </div>
+
+    <script>
+        const API = '';
+        let currentFilter = '';
+        let currentSeder = '';
+
+        // Init
+        async function init() {
+            try {
+                const res = await fetch(`${API}/api/status`);
+                const data = await res.json();
+                const el = document.getElementById('status');
+
+                if (data.status === 'ready') {
+                    el.className = 'status-badge status-ready';
+                    const ver = data.version || 'v2';
+                    el.textContent = `${ver} | ${data.chunks.toLocaleString()} chunks`;
+                    loadTractates();
+                } else if (data.status === 'loading') {
+                    el.className = 'status-badge status-loading';
+                    el.textContent = 'Loading models...';
+                    setTimeout(init, 3000);
+                } else {
+                    el.className = 'status-badge status-error';
+                    el.textContent = data.message || 'No data';
+                }
+            } catch(e) {
+                document.getElementById('status').className = 'status-badge status-error';
+                document.getElementById('status').textContent = 'Server offline';
+            }
+        }
+
+        async function loadTractates() {
+            try {
+                const res = await fetch(`${API}/api/tractates`);
+                const data = await res.json();
+                const bar = document.getElementById('filterBar');
+
+                // Add seder filters first
+                if (data.sedarim) {
+                    for (const s of data.sedarim) {
+                        const chip = document.createElement('span');
+                        chip.className = 'filter-chip';
+                        chip.dataset.seder = s;
+                        chip.textContent = s;
+                        chip.style.borderColor = '#e2b714';
+                        chip.onclick = function() { setSederFilter(this); };
+                        bar.appendChild(chip);
+                    }
+                }
+
+                for (const t of data.tractates) {
+                    const chip = document.createElement('span');
+                    chip.className = 'filter-chip';
+                    chip.dataset.tractate = t;
+                    chip.textContent = t;
+                    chip.onclick = function() { setFilter(this); };
+                    bar.appendChild(chip);
+                }
+            } catch(e) {}
+        }
+
+        function setFilter(el) {
+            document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+            el.classList.add('active');
+            currentFilter = el.dataset.tractate || '';
+            currentSeder = '';
+        }
+
+        function setSederFilter(el) {
+            document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+            el.classList.add('active');
+            currentSeder = el.dataset.seder || '';
+            currentFilter = '';
+        }
+
+        function quickSearch(el) {
+            document.getElementById('searchInput').value = el.textContent;
+            doSearch();
+        }
+
+        async function doSearch() {
+            const q = document.getElementById('searchInput').value.trim();
+            if (!q) return;
+
+            const btn = document.getElementById('searchBtn');
+            const results = document.getElementById('results');
+
+            btn.disabled = true;
+            btn.textContent = '...';
+            results.innerHTML = '<div class="loading"><div class="spinner"></div><p>Searching Shas...</p></div>';
+
+            try {
+                let url = `${API}/api/search?q=${encodeURIComponent(q)}&top_k=5`;
+                if (currentFilter) url += `&tractate=${encodeURIComponent(currentFilter)}`;
+                if (currentSeder) url += `&seder=${encodeURIComponent(currentSeder)}`;
+
+                const res = await fetch(url);
+                const data = await res.json();
+
+                // v3 format: data.answer.sources or fallback to data.results
+                const sources = data.answer?.sources || data.results || [];
+                const timeMs = data.time_ms || 0;
+                const evaluated = data.candidates_evaluated || sources.length;
+
+                if (sources.length === 0) {
+                    results.innerHTML = '<div class="empty-state"><p>No results found</p></div>';
+                    return;
+                }
+
+                let html = `<div class="results-info">${sources.length} results from ${evaluated} candidates in ${timeMs}ms</div>`;
+
+                // LLM Answer card (Claude)
+                if (data.answer?.llm_answer) {
+                    html += `<div style="background:var(--surface);border:2px solid var(--accent);border-radius:var(--radius);padding:16px;margin-bottom:16px;">
+                        <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:8px;">RAV (Claude AI)</div>
+                        <div style="font-size:15px;line-height:1.7;direction:rtl;white-space:pre-wrap;">${escapeHtml(data.answer.llm_answer)}</div>
+                    </div>`;
+                } else if (data.answer?.summary) {
+                    html += `<div style="background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius);padding:12px 16px;margin-bottom:12px;font-size:13px;color:var(--text-dim);">${escapeHtml(data.answer.summary)}</div>`;
+                }
+
+                for (const r of sources) {
+                    const ref = r.ref || r.metadata?.ref || r.id || '';
+                    const tractate = r.tractate || r.metadata?.tractate || '';
+                    const seder = r.seder || '';
+                    const urlLink = r.url || r.metadata?.url || '#';
+                    const score = r.rerank_score || 0;
+                    const biScore = r.bi_score || 0;
+                    const bm25Score = r.bm25_score || 0;
+                    const text = r.full_text || r.text || '';
+                    const hasRashi = r.has_rashi || text.includes('[RASHI');
+                    const hasTosafot = r.has_tosafot || text.includes('[TOSAFOT');
+                    const keyPassages = r.key_passages || [];
+                    const cardId = (ref + '_' + (r.rank||0)).replace(/[^a-zA-Z0-9]/g, '_');
+
+                    // Format main text
+                    let displayText = escapeHtml(text);
+                    displayText = displayText.replace(/\[GEMARA[^\]]*\]/g, '<span class="section-marker">GEMARA</span>');
+                    displayText = displayText.replace(/\[RASHI[^\]]*\]/g, '<span class="section-marker">RASHI</span>');
+                    displayText = displayText.replace(/\[TOSAFOT[^\]]*\]/g, '<span class="section-marker">TOSAFOT</span>');
+
+                    // Key passages highlight
+                    let keyHtml = '';
+                    if (keyPassages.length > 0) {
+                        keyHtml = '<div style="padding:8px 16px;background:rgba(226,183,20,0.05);border-top:1px solid var(--border);font-size:13px;">';
+                        keyHtml += '<span style="color:var(--accent);font-weight:700;font-size:11px;">KEY PASSAGES:</span>';
+                        for (const p of keyPassages.slice(0, 2)) {
+                            keyHtml += `<p style="margin:4px 0;color:var(--text);direction:rtl;">${escapeHtml(p.substring(0, 200))}${p.length > 200 ? '...' : ''}</p>`;
+                        }
+                        keyHtml += '</div>';
+                    }
+
+                    // Score breakdown
+                    const scoreInfo = `Rerank: ${score.toFixed(2)} | Vec: ${biScore.toFixed(3)} | BM25: ${bm25Score.toFixed(1)}`;
+
+                    html += `
+                    <div class="result-card">
+                        <div class="result-header">
+                            <span class="result-ref">${ref}</span>
+                            <span class="result-score">${score.toFixed(2)}</span>
+                        </div>
+                        <div class="result-badges">
+                            ${tractate ? `<span class="badge badge-tractate">${tractate}</span>` : ''}
+                            ${seder ? `<span class="badge" style="background:rgba(255,255,255,0.05);color:var(--text-dim);">${seder}</span>` : ''}
+                            <span class="badge badge-gemara">Gemara</span>
+                            ${hasRashi ? '<span class="badge badge-rashi">Rashi</span>' : ''}
+                            ${hasTosafot ? '<span class="badge badge-tosafot">Tosafot</span>' : ''}
+                        </div>
+                        ${keyHtml}
+                        <div class="result-text" id="text-${cardId}">${displayText}</div>
+                        <div class="result-footer">
+                            <a class="result-link" href="${urlLink}" target="_blank">Sefaria &rarr;</a>
+                            <span style="font-size:11px;color:var(--text-dim);">${scoreInfo}</span>
+                            <button class="expand-btn" onclick="toggleExpand('${cardId}')">Expand</button>
+                        </div>
+                    </div>`;
+                }
+
+                results.innerHTML = html;
+            } catch(e) {
+                results.innerHTML = `<div class="empty-state"><p>Error: ${e.message}</p></div>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Search';
+            }
+        }
+
+        function toggleExpand(id) {
+            const el = document.getElementById(`text-${id}`);
+            if (el) {
+                if (el.style.maxHeight === 'none') {
+                    el.style.maxHeight = '200px';
+                } else {
+                    el.style.maxHeight = 'none';
+                }
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Enter to search
+        document.getElementById('searchInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') doSearch();
+        });
+
+        init();
+    </script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+version: '3.8'
+
+# Talmud RAG App — Mobile-friendly web interface
+# Run: docker compose -f docker-compose.app.yml up -d
+# Access: http://localhost:8000 (or your phone on same WiFi)
+
+services:
+  talmud-rag:
+    build: .
+    container_name: talmud_rag_app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./rag_data_shas:/app/rag_data_shas
+      - ./rag_data_v2:/app/rag_data_v2
+      - ./rag_data:/app/rag_data
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: python -m uvicorn app.server:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped

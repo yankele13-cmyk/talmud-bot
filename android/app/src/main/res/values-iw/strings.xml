@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">תלמוד RAG</string>
+    <string name="search_hint">חפש בתלמוד…</string>
+    <string name="all_filter">הכל</string>
+    <string name="no_results">לא נמצאו תוצאות</string>
+    <string name="loading">מחפש בש״ס…</string>
+    <string name="gemara">גמרא</string>
+    <string name="rashi">רש״י</string>
+    <string name="tosafot">תוספות</string>
+    <string name="expand">הרחב</string>
+    <string name="collapse">צמצם</string>
+    <string name="open_sefaria">פתח בספריא</string>
+    <string name="rav_answer">רב (Claude AI)</string>
+    <string name="key_passages">קטעים מרכזיים</string>
+</resources>

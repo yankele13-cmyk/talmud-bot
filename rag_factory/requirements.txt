@@ -1,0 +1,40 @@
+# === RAG Factory - 100% Local, Zero API Cost ===
+
+# Core RAG framework
+llama-index-core>=0.12.0
+llama-index-llms-ollama>=0.4.0
+llama-index-embeddings-ollama>=0.4.0
+llama-index-vector-stores-chroma>=0.4.0
+llama-index-readers-database>=0.3.0
+
+# Vector database (production-grade, already in docker-compose)
+qdrant-client>=1.17
+
+# Database connectors (SQL/MongoDB)
+sqlalchemy>=2.0
+pymongo>=4.6
+pymysql>=1.1
+psycopg2-binary>=2.9
+
+# Agent orchestration
+pydantic>=2.0
+
+# HTTP (for Sefaria API)
+requests>=2.31
+
+# Hybrid search (BM25 keyword matching)
+rank-bm25>=0.2.2
+
+# Embeddings (local, CPU, no API key)
+sentence-transformers>=3.0
+
+# Web server
+fastapi>=0.100
+uvicorn>=0.20
+
+# Claude API (optional — graceful fallback without it)
+anthropic>=0.80
+
+# Utilities
+rich>=13.0
+python-dotenv>=1.0

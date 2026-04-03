@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Talmud RAG</string>
+    <string name="search_hint">Search the Talmud…</string>
+    <string name="all_filter">All</string>
+    <string name="no_results">No results found</string>
+    <string name="loading">Searching Shas…</string>
+    <string name="gemara">Gemara</string>
+    <string name="rashi">Rashi</string>
+    <string name="tosafot">Tosafot</string>
+    <string name="expand">Expand</string>
+    <string name="collapse">Collapse</string>
+    <string name="open_sefaria">Open in Sefaria</string>
+    <string name="rav_answer">Rav (Claude AI)</string>
+    <string name="key_passages">Key Passages</string>
+</resources>

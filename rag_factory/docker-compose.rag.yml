@@ -1,0 +1,48 @@
+version: '3.8'
+
+# RAG Factory — Self-contained local stack
+# Run: docker compose -f docker-compose.rag.yml up -d
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - rag_net
+
+  # Auto-pull models on first start
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: rag_ollama_init
+    depends_on:
+      - ollama
+    entrypoint: >
+      sh -c "
+        sleep 5 &&
+        ollama pull llama3.2 &&
+        ollama pull nomic-embed-text &&
+        echo 'Models ready!'
+      "
+    environment:
+      - OLLAMA_HOST=ollama:11434
+    networks:
+      - rag_net
+
+volumes:
+  ollama_data:
+
+networks:
+  rag_net:
+    driver: bridge

@@ -20,3 +20,15 @@ build/
 # Application Data (if mounted locally)
 n8n_data/
 qdrant_data/
+rag_data/
+rag_data_v2/
+rag_data_shas/
+ollama_data/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+shas_indexation.log
+rag_data_v4/
